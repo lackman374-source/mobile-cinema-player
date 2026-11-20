@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Mobile Cinema Player</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #09090b;
+      color: #f4f4f5;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+    }
+
+    .player-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      min-height: 100%;
+      background: #000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .player-wrapper:fullscreen,
+    .player-wrapper:-webkit-full-screen {
+      width: 100vw;
+      height: 100dvh;
+      max-width: none;
+      max-height: none;
+      background: #000;
+      transform: none;
+      inset: 0;
+    }
+
+    .player-wrapper.force-fullscreen {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100dvh;
+      z-index: 9998;
+    }
+
+    .player-wrapper.force-landscape {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      right: auto;
+      bottom: auto;
+      transform: translate(-50%, -50%) rotate(90deg);
+      z-index: 9999;
+      background: #000;
+    }
+
+    /* Keep rotation working when this element is in the browser fullscreen layer. */
+    .player-wrapper:fullscreen.force-landscape,
+    .player-wrapper:-webkit-full-screen.force-landscape {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      right: auto;
+      bottom: auto;
+      transform: translate(-50%, -50%) rotate(90deg);
+      transform-origin: center center;
+      background: #000;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #000;
+      display: block;
+      transform: scale(var(--video-zoom, 1));
+      transform-origin: center center;
+      transition: transform 0.08s linear;
+    }
+
+    #touchOverlay {
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      touch-action: none;
+    }
+
+    #speedBadge {
+      position: absolute;
+      top: calc(16px + env(safe-area-inset-top));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 25;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(24, 24, 27, 0.9);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
+    #speedBadge.visible {
+      opacity: 1;
+    }
+
+    .empty-state {
+      position: absolute;
+      inset: 0;
+      z-index: 22;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: #09090b;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .empty-state.hidden {
+      display: none;
+    }
+
+    .empty-open-btn {
+      padding: 12px 22px;
+      font-size: 15px;
+      font-weight: 600;
+      background: #ef4444;
+      border-color: #ef4444;
+    }
+
+    .empty-hint {
+      font-size: 12px;
+      color: #a1a1aa;
+    }
+
+    .controls-overlay {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px calc(14px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left));
+      background: linear-gradient(to top, rgba(0, 0, 0, 0.92) 0%, rgba(0, 0, 0, 0.6) 70%, transparent 100%);
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease;
+    }
+
+    .player-wrapper.controls-hidden .controls-overlay {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+      transform: translateY(10px);
+    }
+
+    .timeline-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .time-text {
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: #e4e4e7;
+      min-width: 42px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    .seek-track {
+      position: relative;
+      flex: 1;
+      height: 26px;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .seek-track::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      height: 5px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.24);
+    }
+
+    .seek-fill {
+      position: relative;
+      height: 5px;
+      width: 0%;
+      border-radius: 999px;
+      background: #ef4444;
+      pointer-events: none;
+    }
+
+    .seek-thumb {
+      position: absolute;
+      left: 0%;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transform: translateX(-50%);
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.65);
+      pointer-events: none;
+    }
+
+    .player-wrapper.no-video .center-controls,
+    .player-wrapper.no-video .zoom-controls,
+    .player-wrapper.no-video .skip-feedback {
+      display: none;
+    }
+
+    .center-controls {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      z-index: 31;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: clamp(18px, 5vw, 34px);
+      transform: translate(-50%, -50%);
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+      transition: opacity 0.2s ease, visibility 0.2s ease;
+    }
+
+    .player-wrapper.controls-hidden .center-controls {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .center-controls .btn {
+      width: 58px;
+      height: 58px;
+      min-width: 58px;
+      min-height: 58px;
+      padding: 0;
+      border-radius: 50%;
+      background: rgba(24, 24, 27, 0.78);
+      border-color: rgba(255, 255, 255, 0.24);
+      font-size: 15px;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+    #playPauseBtn {
+      width: 66px;
+      height: 66px;
+      min-width: 66px;
+      min-height: 66px;
+      font-size: 20px;
+    }
+
+    #playPauseIcon {
+      line-height: 1;
+    }
+
+    .buttons-row {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    .skip-feedback {
+      position: absolute;
+      top: 46%;
+      left: 18%;
+      z-index: 32;
+      display: flex;
+      flex-direction: column-reverse;
+      align-items: center;
+      gap: 10px;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 500;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -50%) scale(0.88);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+
+    .skip-feedback.forward {
+      left: 82%;
+    }
+
+    .skip-feedback::before {
+      content: '';
+      position: absolute;
+      z-index: -1;
+      width: min(34vw, 176px);
+      aspect-ratio: 1;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.19) 0%, rgba(255, 255, 255, 0.09) 48%, transparent 72%);
+      pointer-events: none;
+    }
+
+    .skip-feedback.visible {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+    }
+
+    .skip-feedback .skip-arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 76px;
+      height: 76px;
+      border-radius: 50%;
+      background: rgba(235, 235, 235, 0.48);
+      color: #fff;
+      font-size: 32px;
+      line-height: 1;
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+    }
+
+    @media (max-width: 420px) {
+      .center-controls { gap: 16px; }
+      .center-controls .btn {
+        width: 52px;
+        height: 52px;
+        min-width: 52px;
+        min-height: 52px;
+      }
+      #playPauseBtn {
+        width: 60px;
+        height: 60px;
+        min-width: 60px;
+        min-height: 60px;
+      }
+    }
+
+    .zoom-controls {
+      position: absolute;
+      top: calc(14px + env(safe-area-inset-top));
+      right: calc(14px + env(safe-area-inset-right));
+      z-index: 33;
+      display: flex;
+      gap: 8px;
+      pointer-events: auto;
+    }
+
+    .btn, .file-picker-btn {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      white-space: nowrap;
+      min-height: 40px;
+      min-width: 44px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      background: rgba(24, 24, 27, 0.9);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .btn:active, .file-picker-btn:active {
+      transform: scale(0.96);
+    }
+  </style>
+</head>
+<body>
+  <div class="player-wrapper no-video" id="playerWrapper">
+    <video id="videoPlayer" playsinline preload="metadata"></video>
+
+    <div id="speedBadge">2×</div>
+    <div id="touchOverlay" aria-hidden="true"></div>
+
+    <div class="center-controls" id="centerControls" aria-label="Playback controls">
+      <button type="button" class="btn" id="seekBackBtn" aria-label="Rewind 10 seconds" title="Rewind 10 seconds">-10s</button>
+      <button type="button" class="btn" id="playPauseBtn" aria-label="Play or Pause" title="Play or Pause">
+        <span id="playPauseIcon">&#9654;</span>
+      </button>
+      <button type="button" class="btn" id="seekFwdBtn" aria-label="Forward 10 seconds" title="Forward 10 seconds">+10s</button>
+    </div>
+    <div class="skip-feedback" id="skipFeedback" aria-live="polite" aria-atomic="true">
+      <span class="skip-arrow" id="skipFeedbackArrow">»</span>
+      <span id="skipFeedbackText">10 seconds</span>
+    </div>
+
+    <div class="empty-state" id="emptyState">
+      <label class="file-picker-btn empty-open-btn" for="videoFileInput">
+        Open Video
+      </label>
+      <span class="empty-hint" id="emptyHint">Select a local video file to start</span>
+    </div>
+
+    <input
+      type="file"
+      id="videoFileInput"
+      accept="video/*,.mkv,.webm,.mp4,.mov"
+      style="position:absolute; width:1px; height:1px; opacity:0; overflow:hidden;"
+    />
+
+    <div class="controls-overlay" id="controlsOverlay">
+      <div class="timeline-row">
+        <span class="time-text" id="currentTimeText">0:00</span>
+        <div class="seek-track" id="seekTrack" role="slider" aria-label="Seek timeline" tabindex="0">
+          <div class="seek-fill" id="seekFill"></div>
+          <div class="seek-thumb" id="seekThumb"></div>
+        </div>
+        <span class="time-text" id="durationText">0:00</span>
+      </div>
+
+      <div class="buttons-row">
+        <label class="file-picker-btn" for="videoFileInput">
+          Open Video
+        </label>
+
+        <button type="button" class="btn" id="fullscreenBtn" aria-label="Toggle Fullscreen" title="Fullscreen">
+          <svg id="iconFullscreen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+          </svg>
+          <svg id="iconSmallscreen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+            <path d="M4 14h6v6m10-10h-6V4m0 6 7-7M3 21l7-7"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const video = document.getElementById('videoPlayer');
+    const playerWrapper = document.getElementById('playerWrapper');
+    const touchOverlay = document.getElementById('touchOverlay');
+    const speedBadge = document.getElementById('speedBadge');
+    const playPauseBtn = document.getElementById('playPauseBtn');
+    const playPauseIcon = document.getElementById('playPauseIcon');
+    const seekBackBtn = document.getElementById('seekBackBtn');
+    const seekFwdBtn = document.getElementById('seekFwdBtn');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const iconFullscreen = document.getElementById('iconFullscreen');
+    const iconSmallscreen = document.getElementById('iconSmallscreen');
+    const fileInput = document.getElementById('videoFileInput');
+    const emptyState = document.getElementById('emptyState');
+    const emptyHint = document.getElementById('emptyHint');
+    const seekTrack = document.getElementById('seekTrack');
+    const seekFill = document.getElementById('seekFill');
+    const seekThumb = document.getElementById('seekThumb');
+    const currentTimeText = document.getElementById('currentTimeText');
+    const durationText = document.getElementById('durationText');
+    const skipFeedback = document.getElementById('skipFeedback');
+    const skipFeedbackArrow = document.getElementById('skipFeedbackArrow');
+    const skipFeedbackText = document.getElementById('skipFeedbackText');
+
+    let currentBlobUrl = null;
+    let holdTimer = null;
+    let isHolding2x = false;
+    let prevRate = 1.0;
+    let activePointerId = null;
+    let startX = 0;
+    let startY = 0;
+    let lastTapTime = 0;
+    let singleTapTimer = null;
+    let controlsHideTimer = null;
+    let skipFeedbackTimer = null;
+    let skipFeedbackAmount = 0;
+    let skipFeedbackDirection = 0;
+    let pendingSkipTarget = null;
+    let skipBatchStartTime = null;
+    let isScrubbing = false;
+    let pendingSeekRatio = 0;
+    let scrubPointerId = null;
+    let pointerStartTime = 0;
+    let overlayPointerMoved = false;
+    let isLoadingFile = false;
+    let currentZoom = 1;
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let pinchActive = false;
+
+    function isNativeFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    function isPlayerCssRotated() {
+      return playerWrapper.classList.contains('force-landscape');
+    }
+
+    function formatTime(sec) {
+      if (!Number.isFinite(sec) || sec < 0) return '0:00';
+      const total = Math.floor(sec);
+      const mins = Math.floor(total / 60);
+      const secs = total % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function clearHoldTimer() {
+      if (holdTimer !== null) {
+        clearTimeout(holdTimer);
+        holdTimer = null;
+      }
+    }
+
+    function clearTapTimer() {
+      if (singleTapTimer !== null) {
+        clearTimeout(singleTapTimer);
+        singleTapTimer = null;
+      }
+      lastTapTime = 0;
+    }
+
+    function clearPendingTimers() {
+      clearHoldTimer();
+      clearTapTimer();
+    }
+
+    function setEmptyVisible(visible, message = 'Select a local video file to start') {
+      if (!emptyState) return;
+      if (emptyHint) emptyHint.textContent = message;
+      emptyState.classList.toggle('hidden', !visible);
+      playerWrapper.classList.toggle('no-video', visible);
+      if (visible) {
+        playerWrapper.classList.remove('controls-hidden');
+      }
+    }
+
+    function showControls(autoHide = true) {
+      playerWrapper.classList.remove('controls-hidden');
+      clearTimeout(controlsHideTimer);
+      if (autoHide && video.src && !video.paused && !isHolding2x) {
+        controlsHideTimer = setTimeout(() => {
+          playerWrapper.classList.add('controls-hidden');
+        }, 3000);
+      }
+    }
+
+    function toggleControls() {
+      if (!video.src || video.paused) {
+        showControls(false);
+        return;
+      }
+      if (playerWrapper.classList.contains('controls-hidden')) {
+        showControls(true);
+      } else {
+        clearTimeout(controlsHideTimer);
+        playerWrapper.classList.add('controls-hidden');
+      }
+    }
+
+    function syncPlayIcon() {
+      playPauseIcon.innerHTML = video.paused ? '&#9654;' : '&#10074;&#10074;';
+      showControls(!video.paused);
+    }
+
+    function togglePlayPause() {
+      if (!video.src || video.error) return;
+      if (video.paused) {
+        video.play().catch(() => {
+          setEmptyVisible(true, 'Playback could not start. Try opening the video again.');
+        });
+      } else {
+        video.pause();
+      }
+    }
+
+    function seekTo(time) {
+      if (!video.src || !Number.isFinite(video.duration) || video.duration <= 0) return;
+      try {
+        video.currentTime = Math.max(0, Math.min(video.duration, time));
+      } catch {}
+    }
+
+    function showSkipFeedback(seconds) {
+      if (!skipFeedback || !Number.isFinite(seconds) || seconds === 0) return;
+
+      const direction = Math.sign(seconds);
+      skipFeedbackDirection = direction;
+      skipFeedbackAmount = Math.abs(Math.round(seconds));
+      skipFeedbackArrow.textContent = direction < 0 ? '«' : '»';
+      skipFeedbackText.textContent = `${skipFeedbackAmount}s`;
+      skipFeedback.classList.toggle('forward', direction > 0);
+      skipFeedback.classList.toggle('rewind', direction < 0);
+      skipFeedback.classList.add('visible');
+
+      clearTimeout(skipFeedbackTimer);
+      skipFeedbackTimer = setTimeout(() => {
+        skipFeedback.classList.remove('visible');
+        skipFeedbackAmount = 0;
+        skipFeedbackDirection = 0;
+        skipBatchStartTime = null;
+        pendingSkipTarget = null;
+        skipFeedbackTimer = null;
+      }, 650);
+    }
+
+    function seekBy(seconds) {
+      if (!video.src || !Number.isFinite(video.duration) || video.duration <= 0) return;
+
+      // Apply the seek immediately to avoid adding an artificial debounce delay.
+      // Keep a target position so rapid taps accumulate instead of overwriting each other.
+      const currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0;
+      if (skipBatchStartTime === null || pendingSkipTarget === null) {
+        skipBatchStartTime = currentTime;
+        pendingSkipTarget = currentTime;
+      }
+
+      pendingSkipTarget = Math.max(0, Math.min(video.duration, pendingSkipTarget + seconds));
+      const totalSkipped = pendingSkipTarget - skipBatchStartTime;
+      if (totalSkipped !== 0) showSkipFeedback(totalSkipped);
+
+      seekTo(pendingSkipTarget);
+    }
+
+    function forceResetSpeed() {
+      clearHoldTimer();
+      const wasHolding = isHolding2x;
+      isHolding2x = false;
+      speedBadge.classList.remove('visible');
+      if (wasHolding || (video.playbackRate > 1.5 && prevRate <= 1.5)) {
+        video.playbackRate = Number.isFinite(prevRate) && prevRate > 0 ? prevRate : 1.0;
+      }
+      return wasHolding;
+    }
+
+    function releaseOverlayCapture() {
+      if (activePointerId !== null) {
+        try {
+          if (touchOverlay.hasPointerCapture(activePointerId)) {
+            touchOverlay.releasePointerCapture(activePointerId);
+          }
+        } catch {}
+      }
+      activePointerId = null;
+    }
+
+    setEmptyVisible(true);
+    showControls(false);
+
+    video.addEventListener('play', syncPlayIcon);
+    video.addEventListener('pause', () => {
+      forceResetSpeed();
+      syncPlayIcon();
+    });
+    video.addEventListener('ended', () => {
+      forceResetSpeed();
+      syncPlayIcon();
+    });
+
+    video.addEventListener('error', () => {
+      if (!video.currentSrc && !video.src) return;
+      forceResetSpeed();
+      isLoadingFile = false;
+      const code = video.error?.code;
+      let message = 'This video could not be played. Try another file or format.';
+      if (code === MediaError.MEDIA_ERR_DECODE) message = 'The video file appears damaged or uses an unsupported codec.';
+      else if (code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) message = 'This video format or codec is not supported by this browser.';
+      else if (code === MediaError.MEDIA_ERR_NETWORK) message = 'The video could not be read. Please reopen the file.';
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = null;
+      }
+      resetSeekUI();
+      setEmptyVisible(true, message);
+    });
+
+    video.addEventListener('loadstart', () => {
+      isLoadingFile = true;
+    });
+    video.addEventListener('loadeddata', () => {
+      isLoadingFile = false;
+      setEmptyVisible(false);
+    });
+    video.addEventListener('stalled', () => {
+      if (isLoadingFile) setEmptyVisible(true, 'Video loading has stalled. Try reopening the file.');
+    });
+
+    function updateSeekUI(percent) {
+      const clamped = Math.max(0, Math.min(100, percent));
+      seekFill.style.width = `${clamped}%`;
+      seekThumb.style.left = `${clamped}%`;
+      seekTrack.setAttribute('aria-valuemin', '0');
+      seekTrack.setAttribute('aria-valuemax', '100');
+      seekTrack.setAttribute('aria-valuenow', String(Math.round(clamped)));
+    }
+
+    function resetSeekUI() {
+      updateSeekUI(0);
+      currentTimeText.textContent = '0:00';
+      durationText.textContent = '0:00';
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      durationText.textContent = Number.isFinite(video.duration) ? formatTime(video.duration) : '--:--';
+      isLoadingFile = false;
+    });
+
+    video.addEventListener('timeupdate', () => {
+      if (!isScrubbing && Number.isFinite(video.duration) && video.duration > 0) {
+        updateSeekUI((video.currentTime / video.duration) * 100);
+      }
+      currentTimeText.textContent = formatTime(video.currentTime);
+    });
+
+    function getSeekRatio(e) {
+      const rect = seekTrack.getBoundingClientRect();
+      const isRotated = isPlayerCssRotated();
+      const pos = isRotated ? (e.clientY - rect.top) : (e.clientX - rect.left);
+      const length = Math.max(1, isRotated ? rect.height : rect.width);
+      return Math.max(0, Math.min(1, pos / length));
+    }
+
+    seekTrack.addEventListener('pointerdown', (e) => {
+      if (!video.src || !Number.isFinite(video.duration) || video.duration <= 0 || scrubPointerId !== null) return;
+      e.preventDefault();
+      e.stopPropagation();
+      isScrubbing = true;
+      scrubPointerId = e.pointerId;
+      try { seekTrack.setPointerCapture(e.pointerId); } catch {}
+      clearTimeout(controlsHideTimer);
+      pendingSeekRatio = getSeekRatio(e);
+      updateSeekUI(pendingSeekRatio * 100);
+      currentTimeText.textContent = formatTime(pendingSeekRatio * video.duration);
+    });
+
+    seekTrack.addEventListener('pointermove', (e) => {
+      if (!isScrubbing || e.pointerId !== scrubPointerId || !Number.isFinite(video.duration)) return;
+      pendingSeekRatio = getSeekRatio(e);
+      updateSeekUI(pendingSeekRatio * 100);
+      currentTimeText.textContent = formatTime(pendingSeekRatio * video.duration);
+    });
+
+    function endScrub(e, commit = true) {
+      if (!isScrubbing || (e && e.pointerId !== undefined && e.pointerId !== scrubPointerId)) return;
+      isScrubbing = false;
+      const pointerId = scrubPointerId;
+      scrubPointerId = null;
+      if (pointerId !== null) {
+        try {
+          if (seekTrack.hasPointerCapture(pointerId)) seekTrack.releasePointerCapture(pointerId);
+        } catch {}
+      }
+      if (commit && Number.isFinite(video.duration)) {
+        seekTo(pendingSeekRatio * video.duration);
+      } else if (Number.isFinite(video.duration) && video.duration > 0) {
+        updateSeekUI((video.currentTime / video.duration) * 100);
+        currentTimeText.textContent = formatTime(video.currentTime);
+      }
+      showControls(true);
+    }
+
+    seekTrack.addEventListener('pointerup', (e) => endScrub(e, true));
+    seekTrack.addEventListener('pointercancel', (e) => endScrub(e, false));
+    seekTrack.addEventListener('lostpointercapture', (e) => endScrub(e, false));
+
+    seekTrack.addEventListener('keydown', (e) => {
+      if (!video.src) return;
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        seekBy(-5);
+        showControls(true);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        seekBy(5);
+        showControls(true);
+      }
+    });
+
+    playPauseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      togglePlayPause();
+    });
+
+    seekBackBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      seekBy(-10);
+      showControls(true);
+    });
+
+    seekFwdBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      seekBy(10);
+      showControls(true);
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      forceResetSpeed();
+      clearPendingTimers();
+      pendingSkipTarget = null;
+      skipBatchStartTime = null;
+      clearTimeout(skipFeedbackTimer);
+      skipFeedbackTimer = null;
+      skipFeedbackAmount = 0;
+      skipFeedbackDirection = 0;
+      skipFeedback.classList.remove('visible');
+      releaseOverlayCapture();
+      if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
+
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      currentBlobUrl = URL.createObjectURL(file);
+      video.src = currentBlobUrl;
+      setZoom(1);
+      video.playbackRate = 1.0;
+      prevRate = 1.0;
+      resetSeekUI();
+      isLoadingFile = true;
+      setEmptyVisible(false);
+      video.load();
+      video.play().catch(() => {
+        showControls(false);
+      });
+      fileInput.value = '';
+    });
+
+    function setZoom(value) {
+      currentZoom = Math.max(1, Math.min(4, value));
+      video.style.setProperty('--video-zoom', currentZoom.toFixed(2));
+    }
+
+    function touchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    // Pinch with two fingers to zoom the video from 1x to 4x.
+    touchOverlay.addEventListener('touchstart', (e) => {
+      if (!video.src || e.touches.length !== 2) return;
+      e.preventDefault();
+      pinchActive = true;
+      clearHoldTimer();
+      clearTapTimer();
+      releaseOverlayCapture();
+      forceResetSpeed();
+      pinchStartDistance = touchDistance(e.touches);
+      pinchStartZoom = currentZoom;
+      overlayPointerMoved = true;
+    }, { passive: false });
+
+    touchOverlay.addEventListener('touchmove', (e) => {
+      if (!pinchActive || e.touches.length !== 2) return;
+      e.preventDefault();
+      const distance = touchDistance(e.touches);
+      if (pinchStartDistance > 0) setZoom(pinchStartZoom * distance / pinchStartDistance);
+    }, { passive: false });
+
+    function finishPinch(e) {
+      if (!pinchActive) return;
+      if (e.touches && e.touches.length >= 2) return;
+      pinchActive = false;
+      activePointerId = null;
+      overlayPointerMoved = false;
+      clearTapTimer();
+    }
+    touchOverlay.addEventListener('touchend', finishPinch, { passive: true });
+    touchOverlay.addEventListener('touchcancel', finishPinch, { passive: true });
+    touchOverlay.addEventListener('contextmenu', (e) => e.preventDefault());
+    touchOverlay.addEventListener('dragstart', (e) => e.preventDefault());
+
+    touchOverlay.addEventListener('pointerdown', (e) => {
+      if (!video.src || pinchActive || e.isPrimary === false || activePointerId !== null) return;
+      forceResetSpeed();
+      activePointerId = e.pointerId;
+      try { touchOverlay.setPointerCapture(e.pointerId); } catch {}
+
+      startX = e.clientX;
+      startY = e.clientY;
+      pointerStartTime = Date.now();
+      overlayPointerMoved = false;
+      isHolding2x = false;
+      prevRate = Number.isFinite(video.playbackRate) && video.playbackRate > 0 ? video.playbackRate : 1.0;
+
+      clearHoldTimer();
+      holdTimer = setTimeout(() => {
+        holdTimer = null;
+        if (activePointerId !== e.pointerId || overlayPointerMoved) return;
+        isHolding2x = true;
+        video.playbackRate = 2.0;
+        speedBadge.classList.add('visible');
+        if (video.paused) video.play().catch(() => {});
+      }, 600);
+    });
+
+    touchOverlay.addEventListener('pointermove', (e) => {
+      if (pinchActive || activePointerId !== e.pointerId) return;
+      if (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10) {
+        overlayPointerMoved = true;
+        clearHoldTimer();
+      }
+    });
+
+    function handleOverlayEnd(e) {
+      if (pinchActive || activePointerId === null || e.pointerId !== activePointerId) return;
+      const wasHolding = isHolding2x;
+      releaseOverlayCapture();
+      forceResetSpeed();
+
+      if (!video.src || wasHolding || e.type === 'pointercancel' || overlayPointerMoved) return;
+
+      const now = Date.now();
+      const rect = touchOverlay.getBoundingClientRect();
+      const isRotated = isPlayerCssRotated();
+      const tapPos = isRotated ? (e.clientY - rect.top) : (e.clientX - rect.left);
+      const totalWidth = Math.max(1, isRotated ? rect.height : rect.width);
+
+      if (now - lastTapTime < 280) {
+        clearTimeout(singleTapTimer);
+        singleTapTimer = null;
+        lastTapTime = 0;
+        if (tapPos < totalWidth * 0.4) {
+          seekBy(-10);
+          showControls(true);
+        } else if (tapPos > totalWidth * 0.6) {
+          seekBy(10);
+          showControls(true);
+        } else {
+          toggleControls();
+        }
+      } else {
+        lastTapTime = now;
+        clearTimeout(singleTapTimer);
+        singleTapTimer = setTimeout(() => {
+          singleTapTimer = null;
+          lastTapTime = 0;
+          toggleControls();
+        }, 280);
+      }
+    }
+
+    touchOverlay.addEventListener('pointerup', handleOverlayEnd);
+    touchOverlay.addEventListener('pointercancel', handleOverlayEnd);
+    touchOverlay.addEventListener('lostpointercapture', (e) => {
+      if (activePointerId === e.pointerId) {
+        forceResetSpeed();
+        activePointerId = null;
+      }
+    });
+    window.addEventListener('blur', () => {
+      releaseOverlayCapture();
+      forceResetSpeed();
+      clearTapTimer();
+      overlayPointerMoved = false;
+    });
+
+    function applyRotatedBounds() {
+      if (isPlayerCssRotated()) {
+        // A 90-degree rotation swaps the wrapper's unrotated width and height.
+        // Use the current visual viewport so this also works inside native fullscreen.
+        const viewportWidth = window.visualViewport?.width || window.innerWidth;
+        const viewportHeight = window.visualViewport?.height || window.innerHeight;
+        playerWrapper.style.width = `${viewportHeight}px`;
+        playerWrapper.style.height = `${viewportWidth}px`;
+        playerWrapper.style.top = '50%';
+        playerWrapper.style.left = '50%';
+      } else {
+        playerWrapper.style.width = '';
+        playerWrapper.style.height = '';
+        playerWrapper.style.top = '';
+        playerWrapper.style.left = '';
+      }
+    }
+
+    function syncFullscreenIcon() {
+      const active = isNativeFullscreen();
+      iconFullscreen.style.display = active ? 'none' : 'block';
+      iconSmallscreen.style.display = active ? 'block' : 'none';
+    }
+
+    async function toggleFullscreen() {
+      if (isNativeFullscreen()) {
+        try {
+          if (document.exitFullscreen) await document.exitFullscreen();
+          else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        } catch {}
+      } else {
+        try {
+          if (playerWrapper.requestFullscreen) {
+            await playerWrapper.requestFullscreen({ navigationUI: 'hide' });
+          } else if (playerWrapper.webkitRequestFullscreen) {
+            playerWrapper.webkitRequestFullscreen();
+          } else {
+            playerWrapper.classList.toggle('force-fullscreen');
+          }
+        } catch {
+          playerWrapper.classList.toggle('force-fullscreen');
+        }
+      }
+      syncFullscreenIcon();
+      showControls(!video.paused);
+    }
+
+    function handleFullscreenChange() {
+      applyRotatedBounds();
+      requestAnimationFrame(applyRotatedBounds);
+      setTimeout(applyRotatedBounds, 120);
+      syncFullscreenIcon();
+      showControls(!video.paused);
+    }
+
+    window.addEventListener('resize', applyRotatedBounds);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', applyRotatedBounds);
+    }
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+
+    fullscreenBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFullscreen();
+    });
+
+    window.addEventListener('pagehide', () => {
+      releaseOverlayCapture();
+      forceResetSpeed();
+      clearPendingTimers();
+      clearTimeout(skipFeedbackTimer);
+      pendingSkipTarget = null;
+      skipBatchStartTime = null;
+      if (currentBlobUrl) {
+        URL.revokeObjectURL(currentBlobUrl);
+        currentBlobUrl = null;
+      }
+    });
+  </script>
+</body>
+</html>
