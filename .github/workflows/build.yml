@@ -1,4 +1,5 @@
-name: Build Android APK
+
+name: Build Sanku APK
 
 on:
   workflow_dispatch:
@@ -46,12 +47,17 @@ jobs:
           cat > capacitor.config.json <<'EOF'
           {
             "appId": "com.sanku.mobilecinema",
-            "appName": "Mobile Cinema Player",
+            "appName": "Sanku",
             "webDir": "www"
           }
           EOF
           npx cap add android
           npx cap sync android
+
+      - name: Add fullscreen support
+        run: |
+          mkdir -p android/app/src/main/java/com/sanku/mobilecinema
+          cp MainActivity.java android/app/src/main/java/com/sanku/mobilecinema/MainActivity.java
 
       - name: Build APK
         run: |
@@ -62,6 +68,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Mobile-Cinema-Player-APK
+          name: Sanku-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
           
