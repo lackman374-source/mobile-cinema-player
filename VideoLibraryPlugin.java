@@ -176,116 +176,95 @@ public class VideoLibraryPlugin extends Plugin {
             call.reject("Unable to load videos.", e);
         }
     }
+@PluginMethod
+public void getThumbnail(PluginCall call) {
+    Long id = call.getLong("id");
+    if (id == null) {
+        call.reject("Missing video id.");
+        return;
+    }
 
-    @PluginMethod
-    public void getThumbnail(PluginCall call) {
-        Long id = call.getLong("id");
-        if (id == null) {
-            call.reject("Missing video id.");
-            return;
-        }
+    if (!hasVideoAccess()) {
+        call.reject("Video permission was not granted.");
+        return;
+    }
 
-        if (!hasVideoAccess()) {
-            call.reject("Video permission was not granted.");
-            return;
-        }
+    thumbExecutor.execute(() -> {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            Uri videoUri = ContentUris.withAppendedId(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                id
+            );
 
-        thumbExecutor.execute(() -> {
-            MediaMetadataRetriever retriever = null;
-            try {
-                Uri videoUri = ContentUris.withAppendedId(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    id
-                );
+            Bitmap bitmap = null;
+            if (Build.VERSION.SDK_INT >= 29) {
+                try {
+                    bitmap = getContext().getContentResolver().loadThumbnail(
+                        videoUri,
+                        new Size(320, 320),
+                        null
+                    );
+                } catch (Exception ignored) {}
+            } else {
+                try {
+                    bitmap = MediaStore.Video.Thumbnails.getThumbnail(
+                        getContext().getContentResolver(),
+                        id,
+                        MediaStore.Video.Thumbnails.MINI_KIND,
+                        null
+                    );
+                } catch (Exception ignored) {}
+            }
 
-                Bitmap bitmap = null;
-                if (Build.VERSION.SDK_INT >= 29) {
-                    try {
-                        bitmap = getContext().getContentResolver().loadThumbnail(
-                            videoUri,
-                            new Size(320, 320),
-                            null
-                        );
-                    } catch (Exception ignored) {
-                        // Fall back to MediaMetadataRetriever below
-                    }
-                } else {
-                    try {
-                        bitmap = MediaStore.Video.Thumbnails.getThumbnail(
-                            getContext().getContentResolver(),
-                            id,
-                            MediaStore.Video.Thumbnails.MINI_KIND,
-                            null
-                        );
-                    } catch (Exception ignored) {
-                    }
-                }
-
-                if (bitmap == null) {
-                    retriever = new MediaMetadataRetriever();
+            if (bitmap == null) {
+                try {
                     retriever.setDataSource(getContext(), videoUri);
-
                     if (Build.VERSION.SDK_INT >= 27) {
                         bitmap = retriever.getScaledFrameAtTime(
-                            1_000_000L,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            0L,
+                            MediaMetadataRetriever.OPTION_PREVIOUS_SYNC,
                             320,
                             320
                         );
-                        if (bitmap == null) {
-                            bitmap = retriever.getScaledFrameAtTime(
-                                0L,
-                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
-                                320,
-                                320
-                            );
-                        }
                     } else {
                         bitmap = retriever.getFrameAtTime(
-                            1_000_000L,
-                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                            0L,
+                            MediaMetadataRetriever.OPTION_PREVIOUS_SYNC
                         );
-                        if (bitmap == null) {
-                            bitmap = retriever.getFrameAtTime(
-                                0L,
-                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-                            );
-                        }
                     }
-                }
-
-                if (bitmap == null) {
-                    call.reject("No thumbnail available.");
-                    return;
-                }
-
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
-                bitmap.recycle();
-
-                String base64 = Base64.encodeToString(
-                    out.toByteArray(),
-                    Base64.NO_WRAP
-                );
-
-                JSObject result = new JSObject();
-                result.put("data", "data:image/jpeg;base64," + base64);
-                call.resolve(result);
-
-            } catch (Exception e) {
-                call.reject("Unable to load thumbnail.", e);
-            } finally {
-                if (retriever != null) {
-                    try {
-                        retriever.release();
-                    } catch (Exception ignored) {
-                    }
-                }
+                } catch (Exception ignored) {}
             }
-        });
-    }
 
-    @Override
+            if (bitmap == null) {
+                call.reject("No thumbnail available.");
+                return;
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
+            bitmap.recycle();
+
+            String base64 = Base64.encodeToString(
+                out.toByteArray(),
+                Base64.NO_WRAP
+            );
+
+            JSObject result = new JSObject();
+            result.put("data", "data:image/jpeg;base64," + base64);
+            call.resolve(result);
+
+        } catch (Exception e) {
+            call.reject("Unable to load thumbnail.", e);
+        } finally {
+            try {
+                retriever.release();
+            } catch (Exception ignored) {}
+        }
+    });
+}
+
+        @Override
     protected void handleOnDestroy() {
         thumbExecutor.shutdownNow();
         super.handleOnDestroy();
