@@ -59,7 +59,9 @@ jobs:
           mkdir -p android/app/src/main/java/com/sanku/mobilecinema
           cp MainActivity.java android/app/src/main/java/com/sanku/mobilecinema/MainActivity.java
           cp VideoLibraryPlugin.java android/app/src/main/java/com/sanku/mobilecinema/VideoLibraryPlugin.java
-
+      - name: Add video permission
+        run: |
+          sed -i '/<application/i\    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />' android/app/src/main/AndroidManifest.xml
       - name: Build APK
         run: |
           cd android
