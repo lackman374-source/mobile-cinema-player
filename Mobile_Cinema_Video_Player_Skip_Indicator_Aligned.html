@@ -866,7 +866,7 @@ if (!plugin) {
 
     videoList.style.display = 'block';
   } catch (error) {
-    emptyHint.textContent = 'Could not access videos. Check permission.';
+    emptyHint.textContent = 'Video error: ' + (error?.message || String(error));
   }
 }
 
