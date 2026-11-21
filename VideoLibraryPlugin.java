@@ -3,10 +3,13 @@ package com.sanku.mobilecinema;
 
 import android.Manifest;
 import android.content.ContentUris;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
+
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -21,10 +24,16 @@ import com.getcapacitor.JSObject;
     name = "VideoLibrary",
     permissions = {
         @Permission(
+            alias = "legacyStorage",
+            strings = { Manifest.permission.READ_EXTERNAL_STORAGE }
+        ),
+        @Permission(
             alias = "videos",
-            strings = {
-                Manifest.permission.READ_MEDIA_VIDEO
-            }
+            strings = { Manifest.permission.READ_MEDIA_VIDEO }
+        ),
+        @Permission(
+            alias = "selectedVideos",
+            strings = { Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED }
         )
     }
 )
@@ -32,22 +41,60 @@ public class VideoLibraryPlugin extends Plugin {
 
     @PluginMethod
     public void getVideos(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            !getPermissionState("videos").equals("granted")) {
-            requestPermissionForAlias("videos", call, "permissionResult");
+        if (hasVideoAccess()) {
+            loadVideos(call);
             return;
         }
 
-        loadVideos(call);
+        if (Build.VERSION.SDK_INT >= 34) {
+            requestPermissionForAliases(
+                new String[] { "videos", "selectedVideos" },
+                call,
+                "permissionResult"
+            );
+        } else if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissionForAlias("videos", call, "permissionResult");
+        } else {
+            requestPermissionForAlias(
+                "legacyStorage",
+                call,
+                "permissionResult"
+            );
+        }
     }
 
     @PermissionCallback
     private void permissionResult(PluginCall call) {
-        if (getPermissionState("videos").equals("granted")) {
+        if (hasVideoAccess()) {
             loadVideos(call);
         } else {
             call.reject("Video permission was not granted.");
         }
+    }
+
+    private boolean hasVideoAccess() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            return ContextCompat.checkSelfPermission(
+                getContext(),
+                Manifest.permission.READ_MEDIA_VIDEO
+            ) == PackageManager.PERMISSION_GRANTED
+            || ContextCompat.checkSelfPermission(
+                getContext(),
+                Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
+            ) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            return ContextCompat.checkSelfPermission(
+                getContext(),
+                Manifest.permission.READ_MEDIA_VIDEO
+            ) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        return ContextCompat.checkSelfPermission(
+            getContext(),
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        ) == PackageManager.PERMISSION_GRANTED;
     }
 
     private void loadVideos(PluginCall call) {
@@ -59,8 +106,7 @@ public class VideoLibraryPlugin extends Plugin {
             MediaStore.Video.Media.DURATION
         };
 
-        String sortOrder =
-            MediaStore.Video.Media.DATE_ADDED + " DESC";
+        String sortOrder = MediaStore.Video.Media.DATE_ADDED + " DESC";
 
         try (Cursor cursor = getContext().getContentResolver().query(
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
