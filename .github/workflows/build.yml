@@ -58,7 +58,7 @@ jobs:
         run: |
           mkdir -p android/app/src/main/java/com/sanku/mobilecinema
           cp MainActivity.java android/app/src/main/java/com/sanku/mobilecinema/MainActivity.java
-    cp VideoLibraryPlugin.java android/app/src/main/java/com/sanku/mobilecinema/VideoLibraryPlugin.java
+          cp VideoLibraryPlugin.java android/app/src/main/java/com/sanku/mobilecinema/VideoLibraryPlugin.java
 
       - name: Build APK
         run: |
