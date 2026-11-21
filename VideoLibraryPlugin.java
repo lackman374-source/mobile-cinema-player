@@ -5,6 +5,7 @@ import android.content.ContentUris;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.MediaStore;
@@ -13,18 +14,18 @@ import android.util.Size;
 
 import androidx.core.content.ContextCompat;
 
-import androidx.core.content.ContextCompat;
-
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
-import com.getcapacitor.JSArray;
-import com.getcapacitor.JSObject;
 
 import java.io.ByteArrayOutputStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @CapacitorPlugin(
     name = "VideoLibrary",
@@ -44,6 +45,8 @@ import java.io.ByteArrayOutputStream;
     }
 )
 public class VideoLibraryPlugin extends Plugin {
+
+    private final ExecutorService thumbExecutor = Executors.newFixedThreadPool(3);
 
     @PluginMethod
     public void getVideos(PluginCall call) {
@@ -147,7 +150,6 @@ public class VideoLibraryPlugin extends Plugin {
                     long taken = cursor.getLong(takenColumn);
                     long added = cursor.getLong(addedColumn);
 
-                    // Date taken is in milliseconds; date added is in seconds.
                     long date = taken > 0 ? taken : added * 1000L;
 
                     Uri videoUri = ContentUris.withAppendedId(
@@ -188,46 +190,104 @@ public class VideoLibraryPlugin extends Plugin {
             return;
         }
 
-        try {
-            Uri videoUri = ContentUris.withAppendedId(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                id
-            );
-
-            Bitmap bitmap;
-            if (Build.VERSION.SDK_INT >= 29) {
-                bitmap = getContext().getContentResolver().loadThumbnail(
-                    videoUri,
-                    new Size(320, 320),
-                    null
+        thumbExecutor.execute(() -> {
+            MediaMetadataRetriever retriever = null;
+            try {
+                Uri videoUri = ContentUris.withAppendedId(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    id
                 );
-            } else {
-                bitmap = MediaStore.Video.Thumbnails.getThumbnail(
-                    getContext().getContentResolver(),
-                    id,
-                    MediaStore.Video.Thumbnails.MINI_KIND,
-                    null
+
+                Bitmap bitmap = null;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    try {
+                        bitmap = getContext().getContentResolver().loadThumbnail(
+                            videoUri,
+                            new Size(320, 320),
+                            null
+                        );
+                    } catch (Exception ignored) {
+                        // Fall back to MediaMetadataRetriever below
+                    }
+                } else {
+                    try {
+                        bitmap = MediaStore.Video.Thumbnails.getThumbnail(
+                            getContext().getContentResolver(),
+                            id,
+                            MediaStore.Video.Thumbnails.MINI_KIND,
+                            null
+                        );
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                if (bitmap == null) {
+                    retriever = new MediaMetadataRetriever();
+                    retriever.setDataSource(getContext(), videoUri);
+
+                    if (Build.VERSION.SDK_INT >= 27) {
+                        bitmap = retriever.getScaledFrameAtTime(
+                            1_000_000L,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                            320,
+                            320
+                        );
+                        if (bitmap == null) {
+                            bitmap = retriever.getScaledFrameAtTime(
+                                0L,
+                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC,
+                                320,
+                                320
+                            );
+                        }
+                    } else {
+                        bitmap = retriever.getFrameAtTime(
+                            1_000_000L,
+                            MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                        );
+                        if (bitmap == null) {
+                            bitmap = retriever.getFrameAtTime(
+                                0L,
+                                MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                            );
+                        }
+                    }
+                }
+
+                if (bitmap == null) {
+                    call.reject("No thumbnail available.");
+                    return;
+                }
+
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
+                bitmap.recycle();
+
+                String base64 = Base64.encodeToString(
+                    out.toByteArray(),
+                    Base64.NO_WRAP
                 );
+
+                JSObject result = new JSObject();
+                result.put("data", "data:image/jpeg;base64," + base64);
+                call.resolve(result);
+
+            } catch (Exception e) {
+                call.reject("Unable to load thumbnail.", e);
+            } finally {
+                if (retriever != null) {
+                    try {
+                        retriever.release();
+                    } catch (Exception ignored) {
+                    }
+                }
             }
+        });
+    }
 
-            if (bitmap == null) {
-                call.reject("No thumbnail available.");
-                return;
-            }
-
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 75, out);
-            String base64 = Base64.encodeToString(
-                out.toByteArray(),
-                Base64.NO_WRAP
-            );
-
-            JSObject result = new JSObject();
-            result.put("data", "data:image/jpeg;base64," + base64);
-            call.resolve(result);
-
-        } catch (Exception e) {
-            call.reject("Unable to load thumbnail.", e);
-        }
+    @Override
+    protected void handleOnDestroy() {
+        thumbExecutor.shutdownNow();
+        super.handleOnDestroy();
     }
 }
