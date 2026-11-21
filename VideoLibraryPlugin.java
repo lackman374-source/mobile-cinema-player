@@ -266,7 +266,6 @@ public void getThumbnail(PluginCall call) {
     ).show();
 
     call.reject("Unable to load thumbnail: " + errorMessage, e);
-        }
             try {
                 retriever.release();
             } catch (Exception ignored) {}
