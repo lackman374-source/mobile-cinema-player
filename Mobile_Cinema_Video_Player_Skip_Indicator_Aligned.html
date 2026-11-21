@@ -821,12 +821,18 @@ const closeVideoList = document.getElementById('closeVideoList');
 
 async function openDeviceVideos() {
   try {
-    const plugin = window.Capacitor?.registerPlugin?.('VideoLibrary');
+    const cap = window.Capacitor;
+const plugin = cap?.Plugins?.VideoLibrary ||
+  (typeof cap?.registerPlugin === 'function'
+    ? cap.registerPlugin('VideoLibrary')
+    : null);
 
-    if (!plugin) {
-      emptyHint.textContent = 'Video library plugin unavailable';
-      return;
-    }
+if (!plugin) {
+  const names = Object.keys(cap?.Plugins || {}).join(', ') || 'none';
+  emptyHint.textContent =
+    `Capacitor: ${cap ? 'loaded' : 'missing'}; registerPlugin: ${typeof cap?.registerPlugin}; plugins: ${names}`;
+  return;
+      }
 
     emptyHint.textContent = 'Loading videos...';
 
