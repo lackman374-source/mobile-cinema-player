@@ -255,9 +255,18 @@ public void getThumbnail(PluginCall call) {
             call.resolve(result);
 
         } catch (Exception e) {
-            Toast.makeText(getContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
-            call.reject("Unable to load thumbnail.", e);
-        } finally {
+    String errorMessage = e.getMessage() != null
+            ? e.getMessage()
+            : "Unknown error";
+
+    Toast.makeText(
+            getContext(),
+            "Error: " + errorMessage,
+            Toast.LENGTH_LONG
+    ).show();
+
+    call.reject("Unable to load thumbnail: " + errorMessage, e);
+        }
             try {
                 retriever.release();
             } catch (Exception ignored) {}
