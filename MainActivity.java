@@ -1,3 +1,4 @@
+
 package com.sanku.mobilecinema;
 
 import android.view.View;
@@ -15,6 +16,12 @@ public class MainActivity extends BridgeActivity {
     private WebChromeClient.CustomViewCallback fullscreenCallback;
     private int originalSystemUiVisibility;
     private boolean wasFullscreen;
+
+    @Override
+    public void onCreate(android.os.Bundle savedInstanceState) {
+        registerPlugin(VideoLibraryPlugin.class);
+        super.onCreate(savedInstanceState);
+    }
 
     @Override
     protected void load() {
