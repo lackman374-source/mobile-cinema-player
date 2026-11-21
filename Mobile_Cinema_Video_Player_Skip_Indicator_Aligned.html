@@ -818,56 +818,24 @@
 const videoList = document.getElementById('videoList');
 const videoListItems = document.getElementById('videoListItems');
 const closeVideoList = document.getElementById('closeVideoList');
-
 async function openDeviceVideos() {
-  try {
-    const cap = window.Capacitor;
-const plugin = cap?.Plugins?.VideoLibrary ||
-  (typeof cap?.registerPlugin === 'function'
-    ? cap.registerPlugin('VideoLibrary')
-    : null);
+  const picker = document.createElement('input');
+  picker.type = 'file';
+  picker.accept = 'video/*';
 
-if (!plugin) {
-  const names = Object.keys(cap?.Plugins || {}).join(', ') || 'none';
-  emptyHint.textContent =
-    `Capacitor: ${cap ? 'loaded' : 'missing'}; registerPlugin: ${typeof cap?.registerPlugin}; plugins: ${names}`;
-  return;
-      }
+  picker.addEventListener('change', () => {
+    const file = picker.files?.[0];
+    if (!file) return;
 
-    emptyHint.textContent = 'Loading videos...';
+    video.pause();
+    video.src = URL.createObjectURL(file);
+    video.load();
+    setZoom(1);
+    setEmptyVisible(false);
+    video.play().catch(() => showControls(false));
+  });
 
-    const result = await plugin.getVideos();
-    videoListItems.innerHTML = '';
-
-    if (!result.videos || result.videos.length === 0) {
-      videoListItems.textContent = 'No videos found.';
-    } else {
-      result.videos.forEach(item => {
-        const button = document.createElement('button');
-        button.textContent = item.name;
-        button.style.display = 'block';
-        button.style.width = '100%';
-        button.style.padding = '12px';
-        button.style.margin = '6px 0';
-
-        button.addEventListener('click', () => {
-          video.pause();
-          video.src = item.uri;
-          video.load();
-          setZoom(1);
-          setEmptyVisible(false);
-          video.play().catch(() => showControls(false));
-          videoList.style.display = 'none';
-        });
-
-        videoListItems.appendChild(button);
-      });
-    }
-
-    videoList.style.display = 'block';
-  } catch (error) {
-    emptyHint.textContent = 'Video error: ' + (error?.message || String(error));
-  }
+  picker.click();
 }
 
 document.querySelectorAll('.video-library-button, #videoLibraryBtn')
