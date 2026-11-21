@@ -415,9 +415,9 @@
     </div>
 
     <div class="empty-state" id="emptyState">
-      <label class="file-picker-btn empty-open-btn" for="videoFileInput">
-        Open Video
-      </label>
+      <button type="button" class="file-picker-btn empty-open-btn video-library-button">
+  Browse Videos
+</button>
       <span class="empty-hint" id="emptyHint">Select a local video file to start</span>
     </div>
 
@@ -427,7 +427,14 @@
       accept="video/*,.mkv,.webm,.mp4,.mov"
       style="position:absolute; width:1px; height:1px; opacity:0; overflow:hidden;"
     />
-
+    <div id="videoList" style="display:none; position:absolute; inset:0; z-index:40; background:#121214; color:white; overflow-y:auto; -webkit-overflow-scrolling:touch;">
+      <div style="position:sticky; top:0; z-index:2; display:flex; align-items:center; gap:8px; padding:calc(10px + env(safe-area-inset-top)) 12px 10px; background:#121214;">
+        <h3 style="flex:1; font-size:18px;">My Videos</h3>
+        <button type="button" class="btn" id="videoPickFileBtn">Pick a file</button>
+        <button type="button" class="btn" id="closeVideoList">Close</button>
+      </div>
+      <div id="videoListItems"></div>
+    </div>
     <div class="controls-overlay" id="controlsOverlay">
       <div class="timeline-row">
         <span class="time-text" id="currentTimeText">0:00</span>
@@ -439,9 +446,9 @@
       </div>
 
       <div class="buttons-row">
-        <label class="file-picker-btn" for="videoFileInput">
-          Open Video
-        </label>
+        <button type="button" class="file-picker-btn empty-open-btn" id="videoLibraryBtn">
+  Browse Videos
+        </button>
 
         <button type="button" class="btn" id="fullscreenBtn" aria-label="Toggle Fullscreen" title="Fullscreen">
           <svg id="iconFullscreen" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
@@ -588,8 +595,7 @@
       } else {
         video.pause();
       }
-    }
-
+    }   
     function seekTo(time) {
       if (!video.src || !Number.isFinite(video.duration) || video.duration <= 0) return;
       try {
@@ -811,7 +817,214 @@
       seekBy(10);
       showControls(true);
     });
+const videoList = document.getElementById('videoList');
+const videoListItems = document.getElementById('videoListItems');
+const closeVideoList = document.getElementById('closeVideoList');
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
 
+function formatLibraryDuration(ms) {
+  const total = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = pad2(total % 60);
+  return h > 0 ? `${h}:${pad2(m)}:${sec}` : `${pad2(m)}:${sec}`;
+}
+
+function monthLabel(ms) {
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-US', sameYear ? { month: 'long' } : { month: 'long', year: 'numeric' });
+}
+
+function playLibraryVideo(item) {
+  forceResetSpeed();
+  clearPendingTimers();
+  pendingSkipTarget = null;
+  skipBatchStartTime = null;
+  clearTimeout(skipFeedbackTimer);
+  skipFeedbackTimer = null;
+  skipFeedbackAmount = 0;
+  skipFeedbackDirection = 0;
+  skipFeedback.classList.remove('visible');
+  releaseOverlayCapture();
+  if (currentBlobUrl) {
+    URL.revokeObjectURL(currentBlobUrl);
+    currentBlobUrl = null;
+  }
+
+  video.pause();
+  video.removeAttribute('src');
+  video.load();
+  video.src = window.Capacitor.convertFileSrc(item.uri);
+  setZoom(1);
+  video.playbackRate = 1.0;
+  prevRate = 1.0;
+  resetSeekUI();
+  isLoadingFile = true;
+  setEmptyVisible(false);
+  video.load();
+  video.play().catch(() => showControls(false));
+}
+
+const thumbCache = new Map();
+const thumbQueue = [];
+let thumbActive = 0;
+let thumbsDisabled = false;
+let thumbObserver = null;
+
+function addThumbImage(tile, url) {
+  const img = document.createElement('img');
+  img.decoding = 'async';
+  img.alt = '';
+  img.src = url;
+  img.style.cssText = 'position:absolute; inset:0; width:100%; height:100%; object-fit:cover; pointer-events:none;';
+  tile.insertBefore(img, tile.firstChild);
+}
+
+async function runThumbJob(plugin, job) {
+  const cached = thumbCache.get(job.id);
+  if (cached) {
+    addThumbImage(job.tile, cached);
+    return;
+  }
+  try {
+    const res = await plugin.getThumbnail({ id: job.id });
+    if (res && res.data) {
+      thumbCache.set(job.id, res.data);
+      addThumbImage(job.tile, res.data);
+    }
+  } catch (err) {
+    // Older app builds have no thumbnail method: stop asking and keep plain tiles.
+    if (/not implemented/i.test(String((err && err.message) || err))) thumbsDisabled = true;
+  }
+}
+
+function pumpThumbs(plugin) {
+  while (!thumbsDisabled && thumbActive < 3 && thumbQueue.length) {
+    const job = thumbQueue.shift();
+    thumbActive++;
+    runThumbJob(plugin, job).finally(() => {
+      thumbActive--;
+      pumpThumbs(plugin);
+    });
+  }
+}
+
+function showListMessage(text) {
+  videoListItems.style.cssText = 'padding:16px;';
+  videoListItems.textContent = text;
+}
+
+function renderVideoList(videos, plugin) {
+  if (thumbObserver) thumbObserver.disconnect();
+  thumbObserver = null;
+  thumbQueue.length = 0;
+  videoListItems.textContent = '';
+
+  if (!videos.length) {
+    showListMessage('No videos found on this device.');
+    return;
+  }
+
+  const hasDates = videos.some(v => Number(v.date) > 0);
+  const sorted = hasDates
+    ? videos.slice().sort((a, b) => (Number(b.date) || 0) - (Number(a.date) || 0))
+    : videos;
+
+  videoListItems.style.cssText = 'display:grid; grid-template-columns:repeat(3, 1fr); gap:2px; padding-bottom:24px;';
+
+  // Only fetch thumbnails for tiles that are near the screen.
+  if (typeof IntersectionObserver === 'function') {
+    thumbObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        thumbObserver.unobserve(entry.target);
+        thumbQueue.push(entry.target._thumbJob);
+        pumpThumbs(plugin);
+      });
+    }, { root: videoList, rootMargin: '300px' });
+  }
+
+  let lastKey = '';
+  sorted.forEach(item => {
+    if (hasDates) {
+      const d = new Date(Number(item.date) || 0);
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      if (key !== lastKey) {
+        lastKey = key;
+        const header = document.createElement('div');
+        header.textContent = monthLabel(d.getTime());
+        header.style.cssText = 'grid-column:1 / -1; padding:18px 12px 8px; font-size:17px; font-weight:600;';
+        videoListItems.appendChild(header);
+      }
+    }
+
+    const tile = document.createElement('button');
+    tile.type = 'button';
+    tile.title = item.name || 'Video';
+    tile.setAttribute('aria-label', item.name || 'Video');
+    tile.style.cssText = 'position:relative; display:block; width:100%; aspect-ratio:1; margin:0; padding:0; border:0; overflow:hidden; background:#2a2a2e; color:white;';
+
+    const dur = document.createElement('span');
+    dur.textContent = '\u25B6 ' + formatLibraryDuration(item.duration);
+    dur.style.cssText = 'position:absolute; top:6px; right:6px; z-index:1; padding:2px 7px; border-radius:999px; background:rgba(0,0,0,0.55); font-size:12px; font-weight:500;';
+    tile.appendChild(dur);
+
+    tile.addEventListener('click', () => {
+      videoList.style.display = 'none';
+      playLibraryVideo(item);
+    });
+
+    tile._thumbJob = { id: item.id, tile };
+    videoListItems.appendChild(tile);
+
+    if (thumbObserver) {
+      thumbObserver.observe(tile);
+    } else {
+      thumbQueue.push(tile._thumbJob);
+    }
+  });
+
+  if (!thumbObserver) pumpThumbs(plugin);
+}
+
+async function openDeviceVideos() {
+  const cap = window.Capacitor;
+  const plugin = cap && cap.Plugins && cap.Plugins.VideoLibrary;
+
+  // Not running inside the app, or the plugin is missing: use the file picker.
+  if (!plugin || typeof cap.convertFileSrc !== 'function') {
+    fileInput.click();
+    return;
+  }
+
+  videoList.style.display = 'block';
+  videoList.scrollTop = 0;
+  showListMessage('Loading videos...');
+
+  try {
+    const result = await plugin.getVideos();
+    renderVideoList(Array.isArray(result?.videos) ? result.videos : [], plugin);
+  } catch (err) {
+    // Permission denied or the lookup failed: fall back to the file picker.
+    videoList.style.display = 'none';
+    fileInput.click();
+  }
+}
+
+document.querySelectorAll('.video-library-button, #videoLibraryBtn')
+  .forEach(button => button.addEventListener('click', openDeviceVideos));
+
+closeVideoList.addEventListener('click', () => {
+  videoList.style.display = 'none';
+});
+
+document.getElementById('videoPickFileBtn').addEventListener('click', () => {
+  videoList.style.display = 'none';
+  fileInput.click();
+});
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
@@ -969,14 +1182,13 @@
         activePointerId = null;
       }
     });
-    window.addEventListener('blur', () => {
+   window.addEventListener('blur', () => {
       releaseOverlayCapture();
       forceResetSpeed();
       clearTapTimer();
       overlayPointerMoved = false;
     });
-
-    function applyRotatedBounds() {
+        function applyRotatedBounds() {
       if (isPlayerCssRotated()) {
         // A 90-degree rotation swaps the wrapper's unrotated width and height.
         // Use the current visual viewport so this also works inside native fullscreen.
