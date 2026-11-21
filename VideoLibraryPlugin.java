@@ -255,6 +255,7 @@ public void getThumbnail(PluginCall call) {
             call.resolve(result);
 
         } catch (Exception e) {
+            Toast.makeText(getContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
             call.reject("Unable to load thumbnail.", e);
         } finally {
             try {
