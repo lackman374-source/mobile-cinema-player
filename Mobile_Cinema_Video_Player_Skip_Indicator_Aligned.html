@@ -815,7 +815,61 @@
       seekBy(10);
       showControls(true);
     });
+const videoList = document.getElementById('videoList');
+const videoListItems = document.getElementById('videoListItems');
+const closeVideoList = document.getElementById('closeVideoList');
 
+async function openDeviceVideos() {
+  try {
+    const plugin = window.Capacitor?.Plugins?.VideoLibrary;
+
+    if (!plugin) {
+      emptyHint.textContent = 'Video library plugin unavailable';
+      return;
+    }
+
+    emptyHint.textContent = 'Loading videos...';
+
+    const result = await plugin.getVideos();
+    videoListItems.innerHTML = '';
+
+    if (!result.videos || result.videos.length === 0) {
+      videoListItems.textContent = 'No videos found.';
+    } else {
+      result.videos.forEach(item => {
+        const button = document.createElement('button');
+        button.textContent = item.name;
+        button.style.display = 'block';
+        button.style.width = '100%';
+        button.style.padding = '12px';
+        button.style.margin = '6px 0';
+
+        button.addEventListener('click', () => {
+          video.pause();
+          video.src = item.uri;
+          video.load();
+          setZoom(1);
+          setEmptyVisible(false);
+          video.play().catch(() => showControls(false));
+          videoList.style.display = 'none';
+        });
+
+        videoListItems.appendChild(button);
+      });
+    }
+
+    videoList.style.display = 'block';
+  } catch (error) {
+    emptyHint.textContent = 'Could not access videos. Check permission.';
+  }
+}
+
+document.querySelectorAll('.video-library-button, #videoLibraryBtn')
+  .forEach(button => button.addEventListener('click', openDeviceVideos));
+
+closeVideoList.addEventListener('click', () => {
+  videoList.style.display = 'none';
+});
     fileInput.addEventListener('change', (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
